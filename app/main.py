@@ -7,7 +7,11 @@ import streamlit as st
 from streamlit_webrtc import VideoProcessorBase, webrtc_streamer
 
 from detector import load_model, get_class_ids
-from tracking import update_object_tracks, get_tracking_summary
+from tracking import (
+    update_object_tracks,
+    get_tracking_summary,
+    get_average_confidence
+)
 from utils import find_output_video
 
 
@@ -177,9 +181,13 @@ if uploaded_file is not None:
                 total_object_types
             ) = get_tracking_summary(object_tracks)
 
+            average_confidence = get_average_confidence(
+                results
+            )
+
             st.subheader("Analysis Overview")
 
-            metric1, metric2, metric3 = st.columns(3)
+            metric1, metric2, metric3, metric4 = st.columns(4)
 
             with metric1:
                 st.metric(
@@ -197,6 +205,12 @@ if uploaded_file is not None:
                 st.metric(
                     "Object Types",
                     total_object_types
+                )
+
+            with metric4:
+                st.metric(
+                    "Avg Confidence",
+                    f"{average_confidence:.0%}"
                 )
 
             if object_tracks:

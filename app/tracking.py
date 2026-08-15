@@ -20,7 +20,6 @@ def update_object_tracks(object_tracks, result, model):
     )
 
     for track_id, class_id in zip(track_ids, class_ids):
-
         class_name = model.names[class_id]
 
         if class_name not in object_tracks:
@@ -38,3 +37,23 @@ def get_tracking_summary(object_tracks):
     total_object_types = len(object_tracks)
 
     return total_unique_objects, total_object_types
+
+
+def get_average_confidence(results):
+    confidences = []
+
+    for result in results:
+        if result.boxes is None:
+            continue
+
+        if result.boxes.conf is None:
+            continue
+
+        confidences.extend(
+            result.boxes.conf.cpu().tolist()
+        )
+
+    if not confidences:
+        return 0.0
+
+    return sum(confidences) / len(confidences)
