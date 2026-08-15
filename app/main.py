@@ -1,10 +1,10 @@
-import streamlit as st
-from ultralytics import YOLO
-from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
-import av
-import tempfile
 import os
+import tempfile
 from pathlib import Path
+
+import av
+import streamlit as st
+from streamlit_webrtc import VideoProcessorBase, webrtc_streamer
 
 from detector import load_model, get_class_ids
 from tracking import update_object_tracks, get_tracking_summary
@@ -26,18 +26,12 @@ def get_model():
 model = get_model()
 
 
-# -----------------------------
-# Webcam processor
-# -----------------------------
-
 class YOLOVideoProcessor(VideoProcessorBase):
-
     def __init__(self):
         self.confidence = 0.50
         self.selected_classes = []
 
     def recv(self, frame):
-
         image = frame.to_ndarray(format="bgr24")
 
         track_args = {
@@ -56,7 +50,6 @@ class YOLOVideoProcessor(VideoProcessorBase):
             track_args["classes"] = class_ids
 
         results = model.track(**track_args)
-
         annotated_frame = results[0].plot()
 
         return av.VideoFrame.from_ndarray(
@@ -65,12 +58,7 @@ class YOLOVideoProcessor(VideoProcessorBase):
         )
 
 
-# -----------------------------
-# Sidebar
-# -----------------------------
-
 with st.sidebar:
-
     st.title("AI Vision Tracker")
 
     st.markdown("---")
@@ -102,10 +90,6 @@ with st.sidebar:
     st.caption("Computer Vision • YOLO")
 
 
-# -----------------------------
-# Main page
-# -----------------------------
-
 st.title("AI Vision Tracker")
 
 st.write(
@@ -114,16 +98,11 @@ st.write(
 )
 
 
-# -----------------------------
-# Live Webcam
-# -----------------------------
-
 st.header("Live Webcam Tracking")
 
 st.write(
     "Start your camera to detect and track objects in real time."
 )
-
 
 webrtc_ctx = webrtc_streamer(
     key="yolo-live-tracker",
@@ -135,24 +114,14 @@ webrtc_ctx = webrtc_streamer(
     async_processing=True
 )
 
-
 if webrtc_ctx.video_processor:
-
     webrtc_ctx.video_processor.confidence = confidence
+    webrtc_ctx.video_processor.selected_classes = selected_classes
 
-    webrtc_ctx.video_processor.selected_classes = (
-        selected_classes
-    )
-
-
-# -----------------------------
-# Uploaded Video
-# -----------------------------
 
 st.markdown("---")
 
 st.header("Video Analysis")
-
 
 uploaded_file = st.file_uploader(
     "Choose a video",
@@ -161,30 +130,19 @@ uploaded_file = st.file_uploader(
 
 
 if uploaded_file is not None:
-
     st.success("Video uploaded successfully.")
 
     st.video(uploaded_file)
 
-
     if st.button("Analyze Video"):
-
         with tempfile.NamedTemporaryFile(
             delete=False,
             suffix=Path(uploaded_file.name).suffix
         ) as temp_file:
-
-            temp_file.write(
-                uploaded_file.read()
-            )
-
+            temp_file.write(uploaded_file.read())
             video_path = temp_file.name
 
-
-        with st.spinner(
-            "Detecting and tracking objects..."
-        ):
-
+        with st.spinner("Detecting and tracking objects..."):
             tracking_args = {
                 "source": video_path,
                 "conf": confidence,
@@ -192,144 +150,85 @@ if uploaded_file is not None:
                 "persist": True
             }
 
-
             class_ids = get_class_ids(
                 model,
                 selected_classes
             )
 
-
             if class_ids:
                 tracking_args["classes"] = class_ids
 
-
-            results = model.track(
-                **tracking_args
-            )
-
+            results = model.track(**tracking_args)
 
         st.success("Analysis complete!")
 
-
-        # -----------------------------
-        # Tracking analysis
-        # -----------------------------
-
         object_tracks = {}
 
-
         for result in results:
-
             update_object_tracks(
                 object_tracks,
                 result,
                 model
             )
 
-
         (
             total_unique_objects,
             total_object_types
-        ) = get_tracking_summary(
-            object_tracks
-        )
-
-
-        # -----------------------------
-        # Analysis overview
-        # -----------------------------
+        ) = get_tracking_summary(object_tracks)
 
         st.subheader("Analysis Overview")
 
+        metric1, metric2, metric3 = st.columns(3)
 
-        st.write(
-            f"**Frames Analyzed:** "
-            f"{len(results)}"
-        )
+        with metric1:
+            st.metric(
+                "Frames Analyzed",
+                len(results)
+            )
 
+        with metric2:
+            st.metric(
+                "Unique Objects",
+                total_unique_objects
+            )
 
-        st.write(
-            f"**Unique Objects:** "
-            f"{total_unique_objects}"
-        )
+        with metric3:
+            st.metric(
+                "Object Types",
+                total_object_types
+            )
 
-
-        st.write(
-            f"**Object Types:** "
-            f"{total_object_types}"
-        )
-
-
-        # -----------------------------
-        # Object summary
-        # -----------------------------
-
-        st.subheader(
-            "Unique Objects Tracked"
-        )
-
+        st.subheader("Unique Objects Tracked")
 
         if object_tracks:
-
-            for (
-                object_name,
-                track_ids
-            ) in object_tracks.items():
-
+            for object_name, track_ids in object_tracks.items():
                 st.write(
                     f"**{object_name.title()}**: "
                     f"{len(track_ids)}"
                 )
-
         else:
-
-            st.write(
-                "No trackable objects detected."
-            )
-
-
-        # -----------------------------
-        # Processed video
-        # -----------------------------
+            st.write("No trackable objects detected.")
 
         output_video = find_output_video(
             results[0].save_dir
         )
 
-
         if output_video:
+            st.subheader("Detection & Tracking Result")
 
-            st.subheader(
-                "Detection & Tracking Result"
-            )
+            st.video(str(output_video))
 
-
-            st.video(
-                str(output_video)
-            )
-
-
-            with open(
-                output_video,
-                "rb"
-            ) as video_file:
-
+            with open(output_video, "rb") as video_file:
                 st.download_button(
                     label="Download Result Video",
                     data=video_file,
-                    file_name=(
-                        "ai_vision_tracking_result.mp4"
-                    ),
+                    file_name="ai_vision_tracking_result.mp4",
                     mime="video/mp4"
                 )
-
-
         else:
-
             st.warning(
                 "Tracking completed, but the "
                 "processed video could not be found."
             )
-
 
         os.remove(video_path)
