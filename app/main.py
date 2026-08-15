@@ -142,93 +142,107 @@ if uploaded_file is not None:
             temp_file.write(uploaded_file.read())
             video_path = temp_file.name
 
-        with st.spinner("Detecting and tracking objects..."):
-            tracking_args = {
-                "source": video_path,
-                "conf": confidence,
-                "save": True,
-                "persist": True
-            }
+        try:
+            with st.spinner("Detecting and tracking objects..."):
+                tracking_args = {
+                    "source": video_path,
+                    "conf": confidence,
+                    "save": True,
+                    "persist": True
+                }
 
-            class_ids = get_class_ids(
-                model,
-                selected_classes
-            )
+                class_ids = get_class_ids(
+                    model,
+                    selected_classes
+                )
 
-            if class_ids:
-                tracking_args["classes"] = class_ids
+                if class_ids:
+                    tracking_args["classes"] = class_ids
 
-            results = model.track(**tracking_args)
+                results = model.track(**tracking_args)
 
-        st.success("Analysis complete!")
+            st.success("Analysis complete!")
 
-        object_tracks = {}
+            object_tracks = {}
 
-        for result in results:
-            update_object_tracks(
-                object_tracks,
-                result,
-                model
-            )
+            for result in results:
+                update_object_tracks(
+                    object_tracks,
+                    result,
+                    model
+                )
 
-        (
-            total_unique_objects,
-            total_object_types
-        ) = get_tracking_summary(object_tracks)
-
-        st.subheader("Analysis Overview")
-
-        metric1, metric2, metric3 = st.columns(3)
-
-        with metric1:
-            st.metric(
-                "Frames Analyzed",
-                len(results)
-            )
-
-        with metric2:
-            st.metric(
-                "Unique Objects",
-                total_unique_objects
-            )
-
-        with metric3:
-            st.metric(
-                "Object Types",
+            (
+                total_unique_objects,
                 total_object_types
+            ) = get_tracking_summary(object_tracks)
+
+            st.subheader("Analysis Overview")
+
+            metric1, metric2, metric3 = st.columns(3)
+
+            with metric1:
+                st.metric(
+                    "Frames Analyzed",
+                    len(results)
+                )
+
+            with metric2:
+                st.metric(
+                    "Unique Objects",
+                    total_unique_objects
+                )
+
+            with metric3:
+                st.metric(
+                    "Object Types",
+                    total_object_types
+                )
+
+            if object_tracks:
+                st.subheader("Detection Summary")
+
+                object_counts = {
+                    object_name.title(): len(track_ids)
+                    for object_name, track_ids
+                    in object_tracks.items()
+                }
+
+                st.bar_chart(object_counts)
+
+                st.subheader("Unique Objects Tracked")
+
+                for object_name, track_ids in object_tracks.items():
+                    st.write(
+                        f"**{object_name.title()}**: "
+                        f"{len(track_ids)}"
+                    )
+            else:
+                st.subheader("Detection Summary")
+                st.info("No trackable objects detected.")
+
+            output_video = find_output_video(
+                results[0].save_dir
             )
 
-        st.subheader("Unique Objects Tracked")
+            if output_video:
+                st.subheader("Detection & Tracking Result")
 
-        if object_tracks:
-            for object_name, track_ids in object_tracks.items():
-                st.write(
-                    f"**{object_name.title()}**: "
-                    f"{len(track_ids)}"
+                st.video(str(output_video))
+
+                with open(output_video, "rb") as video_file:
+                    st.download_button(
+                        label="Download Result Video",
+                        data=video_file,
+                        file_name="ai_vision_tracking_result.mp4",
+                        mime="video/mp4"
+                    )
+            else:
+                st.warning(
+                    "Tracking completed, but the "
+                    "processed video could not be found."
                 )
-        else:
-            st.write("No trackable objects detected.")
 
-        output_video = find_output_video(
-            results[0].save_dir
-        )
-
-        if output_video:
-            st.subheader("Detection & Tracking Result")
-
-            st.video(str(output_video))
-
-            with open(output_video, "rb") as video_file:
-                st.download_button(
-                    label="Download Result Video",
-                    data=video_file,
-                    file_name="ai_vision_tracking_result.mp4",
-                    mime="video/mp4"
-                )
-        else:
-            st.warning(
-                "Tracking completed, but the "
-                "processed video could not be found."
-            )
-
-        os.remove(video_path)
+        finally:
+            if os.path.exists(video_path):
+                os.remove(video_path)
