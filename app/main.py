@@ -6,6 +6,10 @@ import tempfile
 import os
 from pathlib import Path
 
+from detector import load_model, get_class_ids
+from tracking import update_object_tracks, get_tracking_summary
+from utils import find_output_video
+
 
 st.set_page_config(
     page_title="AI Vision Tracker",
@@ -15,11 +19,11 @@ st.set_page_config(
 
 
 @st.cache_resource
-def load_model():
-    return YOLO("yolo11s.pt")
+def get_model():
+    return load_model()
 
 
-model = load_model()
+model = get_model()
 
 
 # -----------------------------
@@ -43,14 +47,12 @@ class YOLOVideoProcessor(VideoProcessorBase):
             "verbose": False
         }
 
-        if self.selected_classes:
+        class_ids = get_class_ids(
+            model,
+            self.selected_classes
+        )
 
-            class_ids = [
-                class_id
-                for class_id, class_name in model.names.items()
-                if class_name in self.selected_classes
-            ]
-
+        if class_ids:
             track_args["classes"] = class_ids
 
         results = model.track(**track_args)
@@ -101,14 +103,14 @@ with st.sidebar:
 
 
 # -----------------------------
-# Main application
+# Main page
 # -----------------------------
 
 st.title("AI Vision Tracker")
 
 st.write(
-    "Detect and track objects using YOLO in uploaded videos "
-    "or directly from your webcam."
+    "Detect and track objects using YOLO "
+    "from live webcam or uploaded video."
 )
 
 
@@ -122,6 +124,7 @@ st.write(
     "Start your camera to detect and track objects in real time."
 )
 
+
 webrtc_ctx = webrtc_streamer(
     key="yolo-live-tracker",
     video_processor_factory=YOLOVideoProcessor,
@@ -132,10 +135,14 @@ webrtc_ctx = webrtc_streamer(
     async_processing=True
 )
 
+
 if webrtc_ctx.video_processor:
 
     webrtc_ctx.video_processor.confidence = confidence
-    webrtc_ctx.video_processor.selected_classes = selected_classes
+
+    webrtc_ctx.video_processor.selected_classes = (
+        selected_classes
+    )
 
 
 # -----------------------------
@@ -145,6 +152,7 @@ if webrtc_ctx.video_processor:
 st.markdown("---")
 
 st.header("Video Analysis")
+
 
 uploaded_file = st.file_uploader(
     "Choose a video",
@@ -158,6 +166,7 @@ if uploaded_file is not None:
 
     st.video(uploaded_file)
 
+
     if st.button("Analyze Video"):
 
         with tempfile.NamedTemporaryFile(
@@ -165,11 +174,16 @@ if uploaded_file is not None:
             suffix=Path(uploaded_file.name).suffix
         ) as temp_file:
 
-            temp_file.write(uploaded_file.read())
+            temp_file.write(
+                uploaded_file.read()
+            )
+
             video_path = temp_file.name
 
 
-        with st.spinner("Detecting and tracking objects..."):
+        with st.spinner(
+            "Detecting and tracking objects..."
+        ):
 
             tracking_args = {
                 "source": video_path,
@@ -179,25 +193,26 @@ if uploaded_file is not None:
             }
 
 
-            if selected_classes:
+            class_ids = get_class_ids(
+                model,
+                selected_classes
+            )
 
-                class_ids = [
-                    class_id
-                    for class_id, class_name in model.names.items()
-                    if class_name in selected_classes
-                ]
 
+            if class_ids:
                 tracking_args["classes"] = class_ids
 
 
-            results = model.track(**tracking_args)
+            results = model.track(
+                **tracking_args
+            )
 
 
         st.success("Analysis complete!")
 
 
         # -----------------------------
-        # Unique object tracking
+        # Tracking analysis
         # -----------------------------
 
         object_tracks = {}
@@ -205,81 +220,61 @@ if uploaded_file is not None:
 
         for result in results:
 
-            if result.boxes is None:
-                continue
-
-            if result.boxes.id is None:
-                continue
-
-
-            track_ids = (
-                result.boxes.id
-                .int()
-                .cpu()
-                .tolist()
-            )
-
-            class_ids = (
-                result.boxes.cls
-                .int()
-                .cpu()
-                .tolist()
+            update_object_tracks(
+                object_tracks,
+                result,
+                model
             )
 
 
-            for track_id, class_id in zip(
-                track_ids,
-                class_ids
-            ):
-
-                class_name = model.names[class_id]
-
-
-                if class_name not in object_tracks:
-                    object_tracks[class_name] = set()
-
-
-                object_tracks[class_name].add(track_id)
-
-
-        total_unique_objects = sum(
-            len(track_ids)
-            for track_ids in object_tracks.values()
+        (
+            total_unique_objects,
+            total_object_types
+        ) = get_tracking_summary(
+            object_tracks
         )
 
 
-        total_object_types = len(object_tracks)
-
-
         # -----------------------------
-        # Analysis Overview
+        # Analysis overview
         # -----------------------------
 
         st.subheader("Analysis Overview")
 
-        st.write(
-            f"**Frames Analyzed:** {len(results)}"
-        )
 
         st.write(
-            f"**Unique Objects:** {total_unique_objects}"
+            f"**Frames Analyzed:** "
+            f"{len(results)}"
         )
 
+
         st.write(
-            f"**Object Types:** {total_object_types}"
+            f"**Unique Objects:** "
+            f"{total_unique_objects}"
+        )
+
+
+        st.write(
+            f"**Object Types:** "
+            f"{total_object_types}"
         )
 
 
         # -----------------------------
-        # Object Summary
+        # Object summary
         # -----------------------------
 
-        st.subheader("Unique Objects Tracked")
+        st.subheader(
+            "Unique Objects Tracked"
+        )
 
 
         if object_tracks:
 
-            for object_name, track_ids in object_tracks.items():
+            for (
+                object_name,
+                track_ids
+            ) in object_tracks.items():
 
                 st.write(
                     f"**{object_name.title()}**: "
@@ -294,26 +289,15 @@ if uploaded_file is not None:
 
 
         # -----------------------------
-        # Processed Video
+        # Processed video
         # -----------------------------
 
-        output_dir = Path(
+        output_video = find_output_video(
             results[0].save_dir
         )
 
 
-        video_files = [
-            file
-            for file in output_dir.iterdir()
-            if file.suffix.lower()
-            in [".mp4", ".avi", ".mov"]
-        ]
-
-
-        if video_files:
-
-            output_video = video_files[0]
-
+        if output_video:
 
             st.subheader(
                 "Detection & Tracking Result"
@@ -333,7 +317,9 @@ if uploaded_file is not None:
                 st.download_button(
                     label="Download Result Video",
                     data=video_file,
-                    file_name="ai_vision_tracking_result.mp4",
+                    file_name=(
+                        "ai_vision_tracking_result.mp4"
+                    ),
                     mime="video/mp4"
                 )
 
