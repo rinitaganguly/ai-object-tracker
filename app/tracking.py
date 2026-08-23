@@ -1,26 +1,58 @@
-def update_object_tracks(object_tracks, result, model):
+from deep_sort_realtime.deepsort_tracker import DeepSort
+
+
+def create_tracker():
+    return DeepSort(
+        max_age=30,
+        n_init=3,
+        nms_max_overlap=1.0
+    )
+
+
+def update_tracker(tracker, result, model, frame):
+    detections = []
+
     if result.boxes is None:
-        return
+        return []
 
-    if result.boxes.id is None:
-        return
+    boxes = result.boxes.xyxy.cpu().tolist()
+    confidences = result.boxes.conf.cpu().tolist()
+    class_ids = result.boxes.cls.int().cpu().tolist()
 
-    track_ids = (
-        result.boxes.id
-        .int()
-        .cpu()
-        .tolist()
+    for box, confidence, class_id in zip(
+        boxes,
+        confidences,
+        class_ids
+    ):
+        x1, y1, x2, y2 = box
+
+        width = x2 - x1
+        height = y2 - y1
+
+        detections.append(
+            (
+                [x1, y1, width, height],
+                confidence,
+                model.names[class_id]
+            )
+        )
+
+    return tracker.update_tracks(
+        detections,
+        frame=frame
     )
 
-    class_ids = (
-        result.boxes.cls
-        .int()
-        .cpu()
-        .tolist()
-    )
 
-    for track_id, class_id in zip(track_ids, class_ids):
-        class_name = model.names[class_id]
+def update_object_tracks(object_tracks, tracks):
+    for track in tracks:
+        if not track.is_confirmed():
+            continue
+
+        track_id = track.track_id
+        class_name = track.get_det_class()
+
+        if class_name is None:
+            continue
 
         if class_name not in object_tracks:
             object_tracks[class_name] = set()
